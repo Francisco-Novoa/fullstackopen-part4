@@ -17,7 +17,11 @@ const blogSchema = mongoose.Schema({
         type: String,
         required: true,
     },
-    likes: Number
+    likes: Number,
+    user: {
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User"
+    }
 })
 
 blogSchema.plugin(uniqueValidator)
@@ -31,4 +35,6 @@ blogSchema.set("toJSON", {
     }
 })
 
-module.exports = mongoose.model("Blogs", blogSchema)
+const Blog=mongoose.model("Blogs", blogSchema)
+
+module.exports = Blog

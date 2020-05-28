@@ -2,7 +2,7 @@ const mongoose = require("mongoose")
 const supertest = require("supertest")
 const app = require("../app")
 const Blog = require("../models/blogs")
-
+const User = require("../models/users")
 
 const api = supertest(app)
 
@@ -12,14 +12,16 @@ const initialBlogs = [
 ]
 
 beforeEach(async () => {
+    await User.deleteMany({})
+    const user = ({ username: "panchote", name: "panchote", password: "password" })
+    await api.post("/api/users/").send(user)
+    const login = await api.post("/api/login").send({ username: "panchote", password: "password" })
+    const token = login.body.token
     await Blog.deleteMany({})
-
-    let blogObject = new Blog(initialBlogs[0])
-    await blogObject.save()
-
-    blogObject = new Blog(initialBlogs[1])
-    await blogObject.save()
+    await api.post("/api/blogs/").set("Authorization", `bearer ${token}`).send(initialBlogs[0])
+    await api.post("/api/blogs/").set("Authorization", `bearer ${token}`).send(initialBlogs[1])
 })
+
 describe("when there are some blogs saved initially", () => {
     test("blogs are returned as json", async () => {
         await api
@@ -37,9 +39,12 @@ describe("when there are some blogs saved initially", () => {
     })
 })
 describe("when posting a new blog", () => {
-    test("the new Blog can be Posted and its contents are intact", async () => {
+    test("the new Blog can be posted and its contents are intact", async () => {
+        const login = await api.post("/api/login").send({ username: "panchote", password: "password" })
+        const token = login.body.token
         await api
             .post("/api/blogs/")
+            .set("Authorization", `bearer ${token}`)
             .send(
                 {
                     title: "TDD harms architecture",
@@ -52,16 +57,31 @@ describe("when posting a new blog", () => {
         const titles = response.body.map(r => r.title)
         const authors = response.body.map(r => r.author)
         const urls = response.body.map(r => r.url)
-
+        const user=response.body.map(r => r.user)
         expect(response.body).toHaveLength(initialBlogs.length + 1)
         expect(titles).toContainEqual("TDD harms architecture")
         expect(authors).toContainEqual("Robert C. Martin")
         expect(urls).toContainEqual("http://blog.cleancoder.com/uncle-bob/2017/03/03/TDD-Harms-Architecture.html")
-
+        expect(user).toBeDefined()
     })
-    test("a new Blog with 'likes' missing receives default value", async () => {
+    test("the new Blog can NOT be posted if a token is not provided", async () => {
         await api
             .post("/api/blogs/")
+            .send(
+                {
+                    title: "TDD harms architecture",
+                    author: "Robert C. Martin",
+                    url: "http://blog.cleancoder.com/uncle-bob/2017/03/03/TDD-Harms-Architecture.html",
+                    likes: 0
+                }
+            ).expect(401)
+    })
+    test("a new Blog with 'likes' missing receives default value", async () => {
+        const login = await api.post("/api/login").send({ username: "panchote", password: "password" })
+        const token = login.body.token
+        await api
+            .post("/api/blogs/")
+            .set("Authorization", `bearer ${token}`)
             .send(
                 {
                     title: "TDD harms architecture",
@@ -74,8 +94,11 @@ describe("when posting a new blog", () => {
         expect(martin.likes).toBeDefined()
     })
     test("a new Blog with 'title' missing receives a 400 Bad Request error", async () => {
+        const login = await api.post("/api/login").send({ username: "panchote", password: "password" })
+        const token = login.body.token
         await api
             .post("/api/blogs/")
+            .set("Authorization", `bearer ${token}`)
             .send(
                 {
                     author: "Robert C. Martin",
@@ -86,8 +109,11 @@ describe("when posting a new blog", () => {
             .expect(400)
     })
     test("a new Blog with 'url' missing receives a 400 Bad Request error", async () => {
+        const login = await api.post("/api/login").send({ username: "panchote", password: "password" })
+        const token = login.body.token
         await api
             .post("/api/blogs/")
+            .set("Authorization", `bearer ${token}`)
             .send(
                 {
                     title: "TDD harms architecture",
@@ -98,8 +124,11 @@ describe("when posting a new blog", () => {
             .expect(400)
     })
     test("a new Blog with 'author' missing receives a 400 Bad Request error", async () => {
+        const login = await api.post("/api/login").send({ username: "panchote", password: "password" })
+        const token = login.body.token
         await api
             .post("/api/blogs/")
+            .set("Authorization", `bearer ${token}`)
             .send(
                 {
                     title: "TDD harms architecture",
@@ -111,23 +140,47 @@ describe("when posting a new blog", () => {
     })
 })
 describe("when deleting a blog", () => {
+    beforeAll(async () => {
+        const user = ({ username: "panchote2", name: "panchote2", password: "password" })
+        await api.post("/api/users/").send(user)
+    })
     test("the aproppiate status is send, the response is smaller and the deleted object is no longer there", async () => {
+        const login = await api.post("/api/login").send({ username: "panchote", password: "password" })
+        const token = login.body.token
         const response = await api.get("/api/blogs/")
         expect(response.body[0].id).toBeDefined()
         await api
             .delete(`/api/blogs/${response.body[0].id}`)
+            .set("Authorization", `bearer ${token}`)
             .expect(204)
         const newResponse = await api.get("/api/blogs/")
         expect(newResponse.body).toHaveLength(response.body.length - 1)
         const dijkstra = newResponse.body.find((elem) => elem.author === "Edsger W. Dijkstra")
         expect(dijkstra).toBeUndefined()
     })
+
+    test("when the user trying to delete is not the same as the creater, the blog is not deleted", async () => {
+        const login = await api.post("/api/login").send({ username: "panchote2", password: "password" })
+        const token = login.body.token
+        const response = await api.get("/api/blogs/")
+        await api
+            .delete(`/api/blogs/${response.body[0].id}`)
+            .set("Authorization", `bearer ${token}`)
+            .expect(401)
+        const newResponse = await api.get("/api/blogs/")
+        expect(newResponse.body).toHaveLength(response.body.length)
+        const dijkstra = newResponse.body.find((elem) => elem.author === "Edsger W. Dijkstra")
+        expect(dijkstra).toBeDefined()
+    })
 })
 describe("when updating a blog", () => {
     test("the new Blog can be updated and its contents are correct", async () => {
+        const login = await api.post("/api/login").send({ username: "panchote", password: "password" })
+        const token = login.body.token
         const response = await api.get("/api/blogs/")
         await api
             .put(`/api/blogs/${response.body[0].id}`)
+            .set("Authorization", `bearer ${token}`)
             .send(
                 {
                     title: "el super awesome blog nuevo",
